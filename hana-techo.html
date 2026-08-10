@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<!--
+  小花手帳 v1.1（向日葵版）— 本端單檔 App（無後端、無追蹤、資料只在這台手機）
+  設計：整本手帳只有一朵向日葵——每月新鮮感的「開花章」。
+  配色取自向日葵本體：花瓣金・花芯焦糖棕・葉橄欖綠・一點天空藍。
+
+  規格凍結於 2026-08-08 的腦力激盪：
+    1. 核心排序：快速記錄 > 倒數提醒 > 翻查 > 抽考
+    2. 記錄：輸入框＋一鍵分類 chips，目標 3 秒存完
+    3. 提醒：首頁被動倒數看板（無推播）
+    4. 新鮮感：手動開花，本人說了算；未開花時抽 3 個靈感
+    5. 抽考：v1 砍
+    6. 資料：localStorage＋JSON 匯出/匯入，不上雲、不上鎖
+
+  v2 backlog（砍掉但沒忘）：
+    - 每日隨機翻牌 / 抽考模式
+    - PIN 遮罩
+    - 行事曆匯出（.ics）
+    - 靈感卡「已執行」自動轉約會紀錄
+    - 雲端同步（若做，務必加密，這些資料不該明文離開手機）
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#FBF6EA">
+<title>小花手帳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@600;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FBF6EA;            /* 曬過太陽的米白 */
+    --grid:rgba(180,140,70,.12);/* 方眼線・淡金 */
+    --ink:#4A3A26;              /* 深棕墨 */
+    --ink-soft:#8A7A5F;         /* 拿鐵棕 */
+    --gold:#A8720F;             /* 花瓣金（深，可當文字）*/
+    --petal:#E9B84A;            /* 花瓣金（亮，只給花）*/
+    --petal-deep:#D49A22;       /* 後層花瓣 */
+    --seed:#5C4326;             /* 花芯焦糖棕 */
+    --leaf:#6C7C3B;             /* 葉・橄欖綠 */
+    --sky:#4E6E8B;              /* 天空藍・互動色 */
+    --clay:#B05A24;             /* 焦橙・紀念日 */
+    --greige:#85735A;           /* 暖灰・隨記 */
+    --card:#FFFCF4;
+    --line:#E6DCC2;
+    --serif:"Noto Serif TC","Songti TC","PingFang TC",serif;
+    --sans:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html{font-size:16px}
+  body{
+    font-family:var(--sans);
+    color:var(--ink);
+    background-color:var(--paper);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:24px 24px;
+    min-height:100dvh;
+    padding-bottom:calc(76px + env(safe-area-inset-bottom));
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- 頁首 ---------- */
+  header{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:calc(14px + env(safe-area-inset-top)) 20px 10px;
+  }
+  .wordmark{
+    font-family:var(--serif);font-weight:900;font-size:1.35rem;letter-spacing:.14em;
+  }
+  .wordmark small{
+    font-family:var(--sans);font-weight:600;font-size:.62rem;letter-spacing:.28em;
+    color:var(--gold);display:block;margin-top:2px;
+  }
+  .today-date{
+    font-family:var(--serif);font-weight:600;font-size:.85rem;color:var(--ink-soft);
+    letter-spacing:.1em;
+  }
+
+  main{padding:4px 16px 0;max-width:520px;margin:0 auto}
+  .view{display:none}
+  .view.active{display:block}
+
+  /* ---------- 看板 ---------- */
+  .board{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:6px;
+    box-shadow:0 1px 0 rgba(74,58,38,.06), 0 6px 18px rgba(74,58,38,.05);
+    padding:18px 18px 14px;
+    position:relative;
+    overflow:hidden;
+  }
+  .board::before{ /* 手帳頁的裝訂孔暗示 */
+    content:"";position:absolute;top:10px;bottom:10px;left:7px;width:1px;
+    background:repeating-linear-gradient(var(--line) 0 6px, transparent 6px 14px);
+  }
+  .board-row{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:9px 0 9px 10px;
+  }
+  .board-row + .board-row{border-top:1px dashed var(--line)}
+  .board-label{font-size:.85rem;color:var(--ink-soft);letter-spacing:.08em}
+  .board-value{font-family:var(--serif);font-weight:600;font-size:1rem}
+  .board-value .big{
+    font-weight:900;font-size:1.9rem;line-height:1;letter-spacing:.02em;
+    margin:0 3px;
+  }
+  .board-value .unit{font-size:.85rem;color:var(--ink-soft);font-family:var(--sans);font-weight:400}
+  .anniv-today{color:var(--clay)}
+
+  /* ---------- 新鮮感・開花章 ---------- */
+  .fresh-row{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:12px 0 6px 10px;border-top:1px dashed var(--line);
+    cursor:pointer;user-select:none;-webkit-user-select:none;
+  }
+  .fresh-note{font-size:.72rem;color:var(--ink-soft);margin-top:3px;max-width:200px;line-height:1.5}
+  .bloom-slot{width:80px;height:84px;position:relative;flex:none}
+  .bloom-empty{
+    position:absolute;top:3px;left:3px;width:74px;height:74px;
+    border:1.5px dashed rgba(168,114,15,.55);
+    border-radius:50%;display:flex;align-items:center;justify-content:center;
+    color:rgba(168,114,15,.8);font-size:.68rem;letter-spacing:.15em;
+    writing-mode:vertical-rl;
+  }
+  .bloom{
+    position:absolute;top:0;left:4px;width:72px;height:72px;
+    transform:rotate(-6deg);
+    filter:url(#inkedge);
+  }
+  .bloom-date{
+    position:absolute;left:0;right:0;bottom:0;text-align:center;
+    font-size:.55rem;letter-spacing:.1em;color:var(--gold);
+  }
+  @keyframes bloomIn{
+    0%{transform:rotate(-96deg) scale(.15);opacity:0}
+    60%{transform:rotate(-2deg) scale(1.08);opacity:1}
+    100%{transform:rotate(-6deg) scale(1)}
+  }
+  .bloom.just{animation:bloomIn .42s cubic-bezier(.2,.85,.3,1.15)}
+
+  .suggest{padding:6px 0 4px 10px}
+  .suggest-title{font-size:.72rem;color:var(--ink-soft);letter-spacing:.12em;margin-bottom:6px}
+  .suggest-list{display:flex;flex-direction:column;gap:6px}
+  .suggest-item{
+    font-size:.88rem;background:rgba(124,139,77,.10);
+    border-left:3px solid var(--leaf);
+    padding:7px 10px;border-radius:0 4px 4px 0;
+  }
+  .suggest-actions{margin-top:8px;display:flex;gap:14px}
+  .linklike{
+    background:none;border:none;font-family:var(--sans);font-size:.75rem;
+    color:var(--sky);letter-spacing:.1em;padding:2px 0;cursor:pointer;
+    border-bottom:1px solid transparent;
+  }
+  .linklike:active{border-bottom-color:var(--sky)}
+
+  /* ---------- 快速記錄 ---------- */
+  .capture{margin-top:22px}
+  .section-title{
+    font-family:var(--serif);font-weight:600;font-size:.9rem;letter-spacing:.2em;
+    color:var(--ink-soft);margin:0 2px 8px;
+  }
+  .capture textarea{
+    width:100%;min-height:74px;resize:none;
+    font-family:var(--sans);font-size:1rem;line-height:1.55;color:var(--ink);
+    background:var(--card);border:1px solid var(--line);border-radius:6px;
+    padding:12px 14px;outline:none;
+  }
+  .capture textarea:focus{border-color:var(--sky)}
+  .capture textarea.shake{animation:shake .3s}
+  @keyframes shake{
+    25%{transform:translateX(-4px)}50%{transform:translateX(4px)}75%{transform:translateX(-3px)}
+  }
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .chip{
+    border:1.5px solid var(--cc);border-radius:4px;padding:8px 13px;
+    font-family:var(--sans);font-size:.88rem;letter-spacing:.06em;
+    color:var(--cc);background:var(--ct);
+    cursor:pointer;transition:transform .1s;
+  }
+  .chip:active{transform:scale(.94)}
+  .chip-hint{width:100%;font-size:.7rem;color:var(--ink-soft);margin-top:2px;letter-spacing:.05em}
+  .anniv-extra{display:none;margin-top:10px;gap:8px;align-items:center}
+  .anniv-extra.open{display:flex}
+  .anniv-extra input[type=date]{
+    flex:1;font-family:var(--sans);font-size:.95rem;color:var(--ink);
+    background:var(--card);border:1px solid var(--line);border-radius:6px;padding:9px 10px;
+  }
+  .btn-main{
+    background:var(--gold);color:#FFFCF4;border:none;border-radius:4px;
+    padding:10px 16px;font-size:.88rem;letter-spacing:.08em;cursor:pointer;
+  }
+
+  /* ---------- 翻查 ---------- */
+  .search{
+    width:100%;font-family:var(--sans);font-size:1rem;color:var(--ink);
+    background:var(--card);border:1px solid var(--line);border-radius:6px;
+    padding:11px 14px;outline:none;margin-bottom:10px;
+  }
+  .search:focus{border-color:var(--sky)}
+  .filters{
+    display:flex;gap:7px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px;
+    scrollbar-width:none;
+  }
+  .filters::-webkit-scrollbar{display:none}
+  .filter{
+    flex:none;border:1px solid var(--line);background:var(--card);
+    border-radius:99px;padding:6px 13px;font-size:.82rem;color:var(--ink-soft);
+    cursor:pointer;letter-spacing:.05em;
+  }
+  .filter.on{color:#FFFCF4;border-color:transparent}
+
+  .entry{
+    background:var(--card);border:1px solid var(--line);border-radius:5px;
+    margin-bottom:9px;padding:11px 12px 9px 14px;position:relative;overflow:hidden;
+  }
+  .entry::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c,var(--ink-soft))}
+  .entry-top{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .tag{
+    font-size:.68rem;letter-spacing:.12em;color:var(--c,var(--ink-soft));
+    border:1px solid currentColor;border-radius:3px;padding:1px 6px;
+  }
+  .entry-date{font-size:.7rem;color:var(--ink-soft);margin-left:auto}
+  .entry-del{
+    background:none;border:none;color:var(--ink-soft);font-size:.85rem;
+    padding:2px 4px;cursor:pointer;line-height:1;
+  }
+  .entry-del.arm{color:var(--clay);font-size:.7rem;letter-spacing:.05em}
+  .entry-text{font-size:.95rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+  .entry.done .entry-text{color:var(--ink-soft);text-decoration:line-through;text-decoration-color:rgba(133,115,90,.6)}
+  .todo-line{display:flex;gap:10px;align-items:flex-start}
+  .todo-box{
+    flex:none;width:19px;height:19px;margin-top:2px;
+    border:1.5px solid var(--sky);border-radius:4px;background:none;cursor:pointer;
+    color:var(--sky);font-size:.8rem;line-height:1;
+  }
+  .anniv-meta{font-size:.75rem;color:var(--clay);margin-top:4px;letter-spacing:.05em}
+  .edit-area{width:100%;min-height:64px;font-family:var(--sans);font-size:.95rem;line-height:1.5;
+    border:1px solid var(--sky);border-radius:4px;padding:8px;margin-top:2px;resize:none;outline:none;background:#fff}
+  .edit-actions{display:flex;gap:12px;margin-top:6px}
+
+  .empty{
+    text-align:center;color:var(--ink-soft);font-size:.85rem;line-height:1.7;
+    padding:36px 20px;letter-spacing:.05em;
+  }
+
+  .backup{
+    margin:26px 0 10px;padding-top:14px;border-top:1px dashed var(--line);
+    display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+  }
+  .backup-note{width:100%;font-size:.7rem;color:var(--ink-soft);line-height:1.6}
+  .btn-ghost{
+    background:var(--card);border:1px solid var(--line);border-radius:4px;
+    padding:9px 14px;font-size:.82rem;color:var(--ink);letter-spacing:.08em;cursor:pointer;
+  }
+
+  /* ---------- 底部分頁（索引標籤風）---------- */
+  nav{
+    position:fixed;left:0;right:0;bottom:0;
+    display:flex;justify-content:center;gap:10px;
+    padding:10px 16px calc(10px + env(safe-area-inset-bottom));
+    background:linear-gradient(transparent, var(--paper) 34%);
+  }
+  .tab{
+    flex:1;max-width:180px;
+    font-family:var(--serif);font-weight:600;font-size:.95rem;letter-spacing:.3em;
+    padding:12px 0 11px;text-align:center;
+    background:var(--card);color:var(--ink-soft);
+    border:1px solid var(--line);border-radius:6px 6px 0 0;
+    border-bottom:3px solid var(--line);cursor:pointer;
+  }
+  .tab.on{color:var(--ink);border-bottom-color:var(--petal-deep)}
+
+  /* ---------- 雜項 ---------- */
+  .toast{
+    position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));
+    transform:translateX(-50%) translateY(8px);
+    background:var(--seed);color:var(--paper);
+    font-size:.82rem;letter-spacing:.1em;
+    padding:9px 18px;border-radius:4px;
+    opacity:0;pointer-events:none;transition:.25s;
+    max-width:86vw;text-align:center;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .storage-warn{
+    margin:0 16px 10px;padding:9px 12px;font-size:.75rem;line-height:1.6;
+    background:rgba(176,90,36,.08);border:1px solid rgba(176,90,36,.35);
+    border-radius:5px;color:var(--clay);max-width:520px;
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none !important;transition:none !important}
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <filter id="inkedge">
+    <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="2" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="2.2"/>
+  </filter>
+</svg>
+
+<header>
+  <div class="wordmark">小花手帳<small>HANA TECHO</small></div>
+  <div class="today-date" id="todayDate"></div>
+</header>
+
+<div class="storage-warn" id="storageWarn" style="display:none">
+  預覽模式：這個環境無法保存資料。把檔案下載到手機、用瀏覽器開啟並加入主畫面，記錄才會留下來。
+</div>
+
+<main>
+  <!-- ========== 今日 ========== -->
+  <section class="view active" id="view-today">
+    <div class="board" id="board"></div>
+
+    <div class="capture">
+      <div class="section-title">快速記下</div>
+      <textarea id="captureText" placeholder="她剛剛說了什麼？聽到就記，不用修飾。" rows="3"></textarea>
+      <div class="chips" id="chips"></div>
+      <div class="chip-hint">寫好點一個分類，直接存。</div>
+      <div class="anniv-extra" id="annivExtra">
+        <input type="date" id="annivDate">
+        <button class="btn-main" id="annivSave">存入</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 翻查 ========== -->
+  <section class="view" id="view-browse">
+    <input class="search" id="searchInput" type="search" placeholder="搜尋關鍵字…">
+    <div class="filters" id="filters"></div>
+    <div id="entryList"></div>
+    <div class="backup">
+      <button class="btn-ghost" id="exportBtn">匯出 JSON</button>
+      <button class="btn-ghost" id="importBtn">匯入備份</button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+      <div class="backup-note">資料只存在這台手機。換手機前先匯出，新手機匯入即可搬家。</div>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button class="tab on" data-view="today">今日</button>
+  <button class="tab" data-view="browse">翻查</button>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------- 常數 ---------- */
+  var KEY='hana-techo-v1';
+  var CATS={
+    like : {label:'喜好',   color:'#A8720F', tint:'rgba(200,150,40,.14)'},
+    mine : {label:'雷點',   color:'#6E4A26', tint:'rgba(110,74,38,.11)'},
+    idea : {label:'約會靈感',color:'#6C7C3B', tint:'rgba(124,139,77,.13)'},
+    todo : {label:'待辦',   color:'#4E6E8B', tint:'rgba(94,126,155,.12)'},
+    memo : {label:'隨記',   color:'#85735A', tint:'rgba(156,140,116,.13)'},
+    anniv: {label:'紀念日', color:'#B05A24', tint:'rgba(190,107,52,.12)'}
+  };
+  var CN_MONTH=['一','二','三','四','五','六','七','八','九','十','十一','十二'];
+  var CN_WEEK=['日','一','二','三','四','五','六'];
+  var DAY=86400000;
+
+  /* ---------- 向日葵 SVG ---------- */
+  function sunflowerSVG(){
+    var NS='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(NS,'svg');
+    svg.setAttribute('viewBox','0 0 100 100');
+    svg.setAttribute('width','100%');
+    svg.setAttribute('height','100%');
+    function petals(count,rx,ry,cy,fill,offset){
+      for(var i=0;i<count;i++){
+        var e=document.createElementNS(NS,'ellipse');
+        e.setAttribute('cx','50'); e.setAttribute('cy',String(cy));
+        e.setAttribute('rx',String(rx)); e.setAttribute('ry',String(ry));
+        e.setAttribute('fill',fill);
+        e.setAttribute('transform','rotate('+(offset+i*(360/count))+' 50 50)');
+        svg.appendChild(e);
+      }
+    }
+    petals(12,8,17,18,'#D49A22',15);   /* 後層花瓣 */
+    petals(12,7.5,16,16,'#E9B84A',0);  /* 前層花瓣 */
+    var disc=document.createElementNS(NS,'circle');
+    disc.setAttribute('cx','50');disc.setAttribute('cy','50');disc.setAttribute('r','17');
+    disc.setAttribute('fill','#5C4326');
+    svg.appendChild(disc);
+    var inner=document.createElementNS(NS,'circle');
+    inner.setAttribute('cx','50');inner.setAttribute('cy','50');inner.setAttribute('r','11');
+    inner.setAttribute('fill','#6E522C');
+    svg.appendChild(inner);
+    for(var k=0;k<6;k++){ /* 花芯的籽 */
+      var d=document.createElementNS(NS,'circle');
+      var a=k*Math.PI/3;
+      d.setAttribute('cx',String(50+6.5*Math.cos(a)));
+      d.setAttribute('cy',String(50+6.5*Math.sin(a)));
+      d.setAttribute('r','1.6');
+      d.setAttribute('fill','#4A3A26');
+      svg.appendChild(d);
+    }
+    return svg;
+  }
+
+  /* ---------- 儲存層（localStorage 不可用時退回記憶體） ---------- */
+  var mem=null, storageOK=true;
+  function loadRaw(){
+    try{ return localStorage.getItem(KEY); }
+    catch(e){ storageOK=false; return mem; }
+  }
+  function saveRaw(str){
+    mem=str;
+    try{ localStorage.setItem(KEY,str); }
+    catch(e){ storageOK=false; }
+  }
+
+  /* ---------- 初始資料（第一次打開才種） ---------- */
+  function seed(){
+    var now=Date.now(), i=0;
+    function e(cat,text,extra){
+      var o={id:'s'+(i++), cat:cat, text:text, ts:now-(i*1000)};
+      if(extra) for(var k in extra) o[k]=extra[k];
+      return o;
+    }
+    return {
+      entries:[
+        e('anniv','和小花在一起',{date:'2026-08-04',origin:true}),
+        e('anniv','小花生日',{date:'2000-09-04'}),
+        e('like','飲料：椰果奶綠，無糖去冰'),
+        e('like','劇：怪奇物語、母胎單身、奧德賽'),
+        e('mine','不翻舊帳——同樣的事不要重複發生'),
+        e('memo','吵架不過夜'),
+        e('memo','記住她的小弱點，像是不會看地圖'),
+        e('idea','海邊'),
+        e('idea','Hibi 爬蟲咖啡廳'),
+        e('idea','圓山咖啡廳＋植物園'),
+        e('idea','23 喜劇酒吧'),
+        e('todo','十月日本：開始排行程')
+      ],
+      fresh:{}
+    };
+  }
+
+  var raw=loadRaw();
+  var state;
+  try{ state=raw?JSON.parse(raw):seed(); }
+  catch(e){ state=seed(); }
+  if(!state.entries) state.entries=[];
+  if(!state.fresh) state.fresh={};
+  function persist(){ saveRaw(JSON.stringify(state)); }
+  if(!raw) persist();
+
+  /* ---------- 小工具 ---------- */
+  function $(id){ return document.getElementById(id); }
+  function el(tag,cls,text){
+    var n=document.createElement(tag);
+    if(cls) n.className=cls;
+    if(text!=null) n.textContent=text;
+    return n;
+  }
+  function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+  function startOfDay(d){ return new Date(d.getFullYear(),d.getMonth(),d.getDate()); }
+  function monthKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+  function parseDate(s){ // 'YYYY-MM-DD' → local Date
+    var p=s.split('-');
+    return new Date(+p[0], +p[1]-1, +p[2]);
+  }
+  function fmtShort(ts){
+    var d=new Date(ts);
+    return (d.getMonth()+1)+'/'+d.getDate();
+  }
+  var toastTimer=null;
+  function toast(msg){
+    var t=$('toast');
+    t.textContent=msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer=setTimeout(function(){ t.classList.remove('show'); },1600);
+  }
+  function mulberry32(a){
+    return function(){
+      a|=0; a=a+0x6D2B79F5|0;
+      var t=Math.imul(a^a>>>15,1|a);
+      t=t+Math.imul(t^t>>>7,61|t)^t;
+      return ((t^t>>>14)>>>0)/4294967296;
+    };
+  }
+
+  /* ---------- 看板 ---------- */
+  var suggestOffset=0;
+
+  function nextOccurrence(dateStr,today){
+    var d=parseDate(dateStr);
+    var occ=new Date(today.getFullYear(), d.getMonth(), d.getDate());
+    if(occ < today) occ=new Date(today.getFullYear()+1, d.getMonth(), d.getDate());
+    return occ;
+  }
+
+  function renderBoard(){
+    var board=$('board');
+    board.innerHTML='';
+    var today=startOfDay(new Date());
+
+    /* 在一起第 X 天 */
+    var origin=null;
+    state.entries.forEach(function(en){ if(en.cat==='anniv' && en.origin) origin=en; });
+    if(origin && origin.date){
+      var days=Math.floor((today - startOfDay(parseDate(origin.date)))/DAY)+1;
+      var row=el('div','board-row');
+      row.appendChild(el('div','board-label','在一起'));
+      var v=el('div','board-value');
+      v.appendChild(el('span',null,'第'));
+      v.appendChild(el('span','big',String(days)));
+      v.appendChild(el('span','unit','天'));
+      row.appendChild(v);
+      board.appendChild(row);
+    }
+
+    /* 即將到來的紀念日（最近兩筆） */
+    var upcoming=[];
+    state.entries.forEach(function(en){
+      if(en.cat!=='anniv' || !en.date) return;
+      var occ=nextOccurrence(en.date,today);
+      var du=Math.round((occ-today)/DAY);
+      var years=occ.getFullYear()-parseDate(en.date).getFullYear();
+      upcoming.push({en:en,du:du,years:years});
+    });
+    upcoming.sort(function(a,b){ return a.du-b.du; });
+    upcoming.slice(0,2).forEach(function(u){
+      var row=el('div','board-row');
+      var label=u.en.text;
+      if(u.years>0 && /生日/.test(u.en.text)) label+='（滿 '+u.years+' 歲）';
+      else if(u.years>0 && u.en.origin) label+='（'+u.years+' 週年）';
+      row.appendChild(el('div','board-label',label));
+      var v=el('div','board-value');
+      if(u.du===0){
+        v.appendChild(el('span','anniv-today','就是今天'));
+      }else{
+        v.appendChild(el('span',null,'還有'));
+        v.appendChild(el('span','big',String(u.du)));
+        v.appendChild(el('span','unit','天'));
+      }
+      row.appendChild(v);
+      board.appendChild(row);
+    });
+
+    /* 本月新鮮感・開花章 */
+    var mk=monthKey(new Date());
+    var stamped=!!state.fresh[mk];
+    var frow=el('div','fresh-row');
+    var left=el('div');
+    left.appendChild(el('div','board-label',CN_MONTH[new Date().getMonth()]+'月新鮮感'));
+    left.appendChild(el('div','fresh-note', stamped?'花開了，這個月及格。點花可收回。':'每個月給她一點新鮮感——做到了就點這裡，讓花開。'));
+    frow.appendChild(left);
+    var slot=el('div','bloom-slot');
+    if(stamped){
+      var b=el('div','bloom'+(state.fresh[mk].fresh_just?' just':''));
+      delete state.fresh[mk].fresh_just;
+      b.appendChild(sunflowerSVG());
+      slot.appendChild(b);
+      var sd=new Date(state.fresh[mk].ts||Date.now());
+      slot.appendChild(el('div','bloom-date',(sd.getMonth()+1)+'.'+sd.getDate()+' 開花'));
+    }else{
+      slot.appendChild(el('div','bloom-empty','未開花'));
+    }
+    frow.appendChild(slot);
+    frow.addEventListener('click',function(){
+      if(state.fresh[mk]){
+        delete state.fresh[mk];
+        toast('花先收回去了');
+      }else{
+        state.fresh[mk]={ts:Date.now(),fresh_just:true};
+        toast('開花了・'+CN_MONTH[new Date().getMonth()]+'月新鮮');
+      }
+      persist(); renderBoard();
+    });
+    board.appendChild(frow);
+
+    /* 未開花 → 抽 3 個靈感 */
+    if(!stamped){
+      var ideas=state.entries.filter(function(en){ return en.cat==='idea'; });
+      var box=el('div','suggest');
+      box.appendChild(el('div','suggest-title','靈感池抽三個 ——'));
+      if(ideas.length===0){
+        box.appendChild(el('div','fresh-note','靈感池是空的。想到想帶她去的地方，先丟進來。'));
+      }else{
+        var d=new Date();
+        var rand=mulberry32(d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate()+suggestOffset*7919);
+        var pool=ideas.slice();
+        for(var i=pool.length-1;i>0;i--){
+          var j=Math.floor(rand()*(i+1));
+          var tmp=pool[i]; pool[i]=pool[j]; pool[j]=tmp;
+        }
+        var list=el('div','suggest-list');
+        pool.slice(0,3).forEach(function(en){
+          list.appendChild(el('div','suggest-item',en.text));
+        });
+        box.appendChild(list);
+        if(ideas.length>3){
+          var acts=el('div','suggest-actions');
+          var again=el('button','linklike','換一批');
+          again.addEventListener('click',function(ev){
+            ev.stopPropagation();
+            suggestOffset++; renderBoard();
+          });
+          acts.appendChild(again);
+          box.appendChild(acts);
+        }
+      }
+      board.appendChild(box);
+    }
+  }
+
+  /* ---------- 快速記錄 ---------- */
+  var pendingAnnivText='';
+
+  function renderChips(){
+    var wrap=$('chips');
+    wrap.innerHTML='';
+    Object.keys(CATS).forEach(function(key){
+      var c=CATS[key];
+      var b=el('button','chip',c.label);
+      b.style.setProperty('--cc',c.color);
+      b.style.setProperty('--ct',c.tint);
+      b.addEventListener('click',function(){ onChip(key); });
+      wrap.appendChild(b);
+    });
+  }
+
+  function onChip(cat){
+    var ta=$('captureText');
+    var text=ta.value.trim();
+    if(!text){
+      ta.classList.remove('shake');
+      void ta.offsetWidth;
+      ta.classList.add('shake');
+      ta.focus();
+      return;
+    }
+    if(cat==='anniv'){
+      pendingAnnivText=text;
+      var extra=$('annivExtra');
+      extra.classList.add('open');
+      var di=$('annivDate');
+      if(!di.value){
+        var t=new Date();
+        di.value=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+      }
+      return;
+    }
+    addEntry(cat,text);
+    ta.value='';
+    $('annivExtra').classList.remove('open');
+  }
+
+  function addEntry(cat,text,extra){
+    var en={id:uid(),cat:cat,text:text,ts:Date.now()};
+    if(extra) for(var k in extra) en[k]=extra[k];
+    state.entries.unshift(en);
+    persist();
+    toast('已存入・'+CATS[cat].label);
+    renderBoard();
+    renderList();
+  }
+
+  $('annivSave').addEventListener('click',function(){
+    var d=$('annivDate').value;
+    if(!d){ toast('紀念日需要日期'); return; }
+    addEntry('anniv',pendingAnnivText,{date:d});
+    pendingAnnivText='';
+    $('captureText').value='';
+    $('annivExtra').classList.remove('open');
+  });
+
+  /* ---------- 翻查 ---------- */
+  var curFilter='all';
+  var editingId=null;
+  var armedDelete=null;
+
+  function renderFilters(){
+    var wrap=$('filters');
+    wrap.innerHTML='';
+    var all=el('button','filter'+(curFilter==='all'?' on':''),'全部');
+    if(curFilter==='all') all.style.background='var(--ink)';
+    all.addEventListener('click',function(){ curFilter='all'; renderFilters(); renderList(); });
+    wrap.appendChild(all);
+    Object.keys(CATS).forEach(function(key){
+      var b=el('button','filter'+(curFilter===key?' on':''),CATS[key].label);
+      if(curFilter===key) b.style.background=CATS[key].color;
+      b.addEventListener('click',function(){ curFilter=key; renderFilters(); renderList(); });
+      wrap.appendChild(b);
+    });
+  }
+
+  function renderList(){
+    var wrap=$('entryList');
+    wrap.innerHTML='';
+    var q=$('searchInput').value.trim().toLowerCase();
+    var shown=state.entries.filter(function(en){
+      if(curFilter!=='all' && en.cat!==curFilter) return false;
+      if(q && en.text.toLowerCase().indexOf(q)<0 && CATS[en.cat].label.indexOf(q)<0) return false;
+      return true;
+    });
+
+    if(shown.length===0){
+      var msg= q ? '找不到「'+q+'」。'
+             : (curFilter==='all' ? '手帳還是空的。回到今日頁，聽到什麼就記下來。'
+                                  : '這一類還沒有記錄。');
+      wrap.appendChild(el('div','empty',msg));
+      return;
+    }
+
+    shown.forEach(function(en){
+      var card=el('div','entry'+(en.done?' done':''));
+      card.style.setProperty('--c',CATS[en.cat].color);
+
+      var top=el('div','entry-top');
+      top.appendChild(el('span','tag',CATS[en.cat].label));
+      top.appendChild(el('span','entry-date',fmtShort(en.ts)));
+      var del=el('button','entry-del'+(armedDelete===en.id?' arm':''), armedDelete===en.id?'確定刪除':'✕');
+      del.addEventListener('click',function(ev){
+        ev.stopPropagation();
+        if(armedDelete===en.id){
+          state.entries=state.entries.filter(function(x){ return x.id!==en.id; });
+          armedDelete=null;
+          persist(); renderList(); renderBoard();
+          toast('已刪除');
+        }else{
+          armedDelete=en.id;
+          renderList();
+        }
+      });
+      top.appendChild(del);
+      card.appendChild(top);
+
+      if(editingId===en.id){
+        var ta=el('textarea','edit-area');
+        ta.value=en.text;
+        card.appendChild(ta);
+        var acts=el('div','edit-actions');
+        var ok=el('button','linklike','存好');
+        ok.addEventListener('click',function(){
+          var t=ta.value.trim();
+          if(t){ en.text=t; persist(); }
+          editingId=null;
+          renderList(); renderBoard();
+        });
+        var cancel=el('button','linklike','取消');
+        cancel.addEventListener('click',function(){ editingId=null; renderList(); });
+        acts.appendChild(ok); acts.appendChild(cancel);
+        card.appendChild(acts);
+        wrap.appendChild(card);
+        setTimeout(function(){ ta.focus(); },50);
+        return;
+      }
+
+      var body;
+      if(en.cat==='todo'){
+        body=el('div','todo-line');
+        var box=el('button','todo-box', en.done?'✓':'');
+        box.addEventListener('click',function(ev){
+          ev.stopPropagation();
+          en.done=!en.done;
+          persist(); renderList();
+          if(en.done) toast('劃掉一件');
+        });
+        body.appendChild(box);
+        body.appendChild(el('div','entry-text',en.text));
+      }else{
+        body=el('div','entry-text',en.text);
+      }
+      body.addEventListener('click',function(){
+        armedDelete=null;
+        editingId=en.id;
+        renderList();
+      });
+      card.appendChild(body);
+
+      if(en.cat==='anniv' && en.date){
+        var d=parseDate(en.date);
+        card.appendChild(el('div','anniv-meta',d.getFullYear()+' 年 '+(d.getMonth()+1)+' 月 '+d.getDate()+' 日'));
+      }
+
+      wrap.appendChild(card);
+    });
+  }
+
+  $('searchInput').addEventListener('input',function(){ armedDelete=null; renderList(); });
+
+  /* ---------- 備份 ---------- */
+  $('exportBtn').addEventListener('click',function(){
+    var blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+    var a=document.createElement('a');
+    var d=new Date();
+    a.href=URL.createObjectURL(blob);
+    a.download='hana-techo-backup-'+d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },400);
+    toast('已匯出備份');
+  });
+
+  var importArmed=false;
+  $('importBtn').addEventListener('click',function(){
+    if(!importArmed){
+      importArmed=true;
+      this.textContent='匯入會覆蓋現有資料，再點一次選檔';
+      var self=this;
+      setTimeout(function(){ importArmed=false; self.textContent='匯入備份'; },4000);
+      return;
+    }
+    $('importFile').click();
+  });
+  $('importFile').addEventListener('change',function(){
+    var f=this.files[0];
+    this.value='';
+    importArmed=false;
+    $('importBtn').textContent='匯入備份';
+    if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      try{
+        var data=JSON.parse(reader.result);
+        if(!data || !Array.isArray(data.entries)) throw new Error('bad');
+        state=data;
+        if(!state.fresh) state.fresh={};
+        persist();
+        renderBoard(); renderFilters(); renderList();
+        toast('備份已匯入');
+      }catch(e){
+        toast('這個檔案讀不懂，確認是手帳匯出的 JSON');
+      }
+    };
+    reader.readAsText(f);
+  });
+
+  /* ---------- 分頁 ---------- */
+  var tabs=document.querySelectorAll('.tab');
+  tabs.forEach(function(t){
+    t.addEventListener('click',function(){
+      tabs.forEach(function(x){ x.classList.remove('on'); });
+      t.classList.add('on');
+      document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
+      $('view-'+t.dataset.view).classList.add('active');
+      if(t.dataset.view==='browse'){ armedDelete=null; renderList(); }
+      window.scrollTo(0,0);
+    });
+  });
+
+  /* ---------- 啟動 ---------- */
+  var now=new Date();
+  $('todayDate').textContent=CN_MONTH[now.getMonth()]+'月'+now.getDate()+'日（'+CN_WEEK[now.getDay()]+'）';
+  renderChips();
+  renderBoard();
+  renderFilters();
+  renderList();
+  loadRaw(); // 再探一次儲存狀態
+  if(!storageOK) $('storageWarn').style.display='block';
+})();
+</script>
+</body>
+</html>
