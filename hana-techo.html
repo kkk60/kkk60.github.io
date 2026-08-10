@@ -173,7 +173,7 @@
     padding:12px 14px;outline:none;
   }
   .capture textarea:focus{border-color:var(--sky)}
-  .capture textarea.shake{animation:shake .3s}
+  .shake{animation:shake .3s}
   @keyframes shake{
     25%{transform:translateX(-4px)}50%{transform:translateX(4px)}75%{transform:translateX(-3px)}
   }
@@ -215,6 +215,13 @@
     cursor:pointer;letter-spacing:.05em;
   }
   .filter.on{color:#FFFCF4;border-color:transparent}
+
+  .browse-add{margin:2px 0 14px}
+  .browse-add .search{margin-bottom:8px}
+  .browse-save{
+    border:none;border-radius:4px;color:#FFFCF4;
+    padding:10px 16px;font-size:.88rem;letter-spacing:.08em;cursor:pointer;
+  }
 
   .entry{
     background:var(--card);border:1px solid var(--line);border-radius:5px;
@@ -337,6 +344,14 @@
   <section class="view" id="view-browse">
     <input class="search" id="searchInput" type="search" placeholder="搜尋關鍵字…">
     <div class="filters" id="filters"></div>
+    <div class="browse-add">
+      <input class="search" id="browseText" type="text" placeholder="快速新增，寫好點分類">
+      <div class="chips" id="browseTarget" style="margin-top:0"></div>
+      <div class="anniv-extra" id="browseAnnivExtra">
+        <input type="date" id="browseDate">
+        <button class="btn-main" id="browseDateSave">存入</button>
+      </div>
+    </div>
     <div id="entryList"></div>
     <div class="backup">
       <button class="btn-ghost" id="exportBtn">匯出 JSON</button>
@@ -685,6 +700,73 @@
   var curFilter='all';
   var editingId=null;
   var armedDelete=null;
+  var browsePendingText='';
+
+  function browseSave(cat){
+    var inp=$('browseText');
+    var text=inp.value.trim();
+    if(!text){
+      inp.classList.remove('shake');
+      void inp.offsetWidth;
+      inp.classList.add('shake');
+      inp.focus();
+      return;
+    }
+    if(cat==='anniv'){
+      browsePendingText=text;
+      var extra=$('browseAnnivExtra');
+      extra.classList.add('open');
+      var di=$('browseDate');
+      if(!di.value){
+        var t=new Date();
+        di.value=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+      }
+      return;
+    }
+    addEntry(cat,text);
+    inp.value='';
+    $('browseAnnivExtra').classList.remove('open');
+  }
+
+  function renderBrowseAdd(){
+    var target=$('browseTarget');
+    target.innerHTML='';
+    $('browseAnnivExtra').classList.remove('open');
+    var inp=$('browseText');
+    if(curFilter==='all'){
+      inp.placeholder='快速新增，寫好點分類';
+      Object.keys(CATS).forEach(function(key){
+        var c=CATS[key];
+        var b=el('button','chip',c.label);
+        b.style.setProperty('--cc',c.color);
+        b.style.setProperty('--ct',c.tint);
+        b.addEventListener('click',function(){ browseSave(key); });
+        target.appendChild(b);
+      });
+    }else{
+      inp.placeholder='新增一筆'+CATS[curFilter].label+'…';
+      var btn=el('button','browse-save','存入・'+CATS[curFilter].label);
+      btn.style.background=CATS[curFilter].color;
+      btn.addEventListener('click',function(){ browseSave(curFilter); });
+      target.appendChild(btn);
+    }
+  }
+
+  $('browseText').addEventListener('keydown',function(ev){
+    if(ev.key==='Enter'){
+      ev.preventDefault();
+      if(curFilter!=='all') browseSave(curFilter);
+    }
+  });
+
+  $('browseDateSave').addEventListener('click',function(){
+    var d=$('browseDate').value;
+    if(!d){ toast('紀念日需要日期'); return; }
+    addEntry('anniv',browsePendingText,{date:d});
+    browsePendingText='';
+    $('browseText').value='';
+    $('browseAnnivExtra').classList.remove('open');
+  });
 
   function renderFilters(){
     var wrap=$('filters');
@@ -699,6 +781,7 @@
       b.addEventListener('click',function(){ curFilter=key; renderFilters(); renderList(); });
       wrap.appendChild(b);
     });
+    renderBrowseAdd();
   }
 
   function renderList(){
